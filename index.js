@@ -3,10 +3,8 @@ const app = express();
 const cors = require("cors");
 const { MongoClient, ObjectId } = require("mongodb");
 const dotenv = require("dotenv").config();
-
-const PORT = 8000;
-const HOST = '127.0.0.1';
 const URL = process.env.DB;
+
 const DB_NAME = "movie_db";
 const COLLECTION_NAME = "movies";
 
@@ -19,11 +17,21 @@ app.use(express.json());
 
 app.get("/movie/get-movies", async (req, res) => {
   try {
-    const client = new MongoClient(URL, {}).connect();
-    let db = (await client).db(DB_NAME);
+    // Step 1. Connect the Database
+    const client = await new MongoClient(URL).connect();
+
+    // Step 2. Select the DB
+    let db = client.db(DB_NAME);
+
+    // Step 3. Select the Collection
     let collection = await db.collection(COLLECTION_NAME);
+
+    // Step 4. Do the operation
     let movies = await collection.find({}).toArray();
-    (await client).close();
+
+    // Step 5. Close the connection
+    client.close();
+
     res.json(movies);
   } catch (error) {
     console.log(error);
@@ -34,11 +42,20 @@ app.get("/movie/get-movies", async (req, res) => {
 app.get("/movie/:id", async (req, res) => {
   try {
     const id = req.params.id;
-    const client = new MongoClient(URL, {}).connect();
-    let db = (await client).db(DB_NAME);
+
+    // Step 1. Connect the Database
+    const client = await new MongoClient(URL).connect();
+
+    // Step 2. Select the DB
+    let db = client.db(DB_NAME);
+
+    // Step 3. Select the Collection
     let dbcollection = await db.collection(COLLECTION_NAME);
+
     let movie = await dbcollection.findOne({ _id: new ObjectId(id) });
-    (await client).close();
+
+    client.close();
+
     res.json(movie);
   } catch (error) {
     console.log(error);
@@ -67,8 +84,8 @@ app.post("/movie/book-movie", async (req, res) => {
   }
 
   try {
-    const client = new MongoClient(URL, {}).connect();
-    let db = (await client).db(DB_NAME);
+    const client = await new MongoClient(URL).connect();
+    let db = client.db(DB_NAME);
     let dbcollection = await db.collection(COLLECTION_NAME);
 
     let movie = await dbcollection.findOne({
@@ -84,7 +101,7 @@ app.post("/movie/book-movie", async (req, res) => {
       .find((s) => s.id === bookingRequest.showId);
 
     if (!show) {
-      return res.status(404).json({ message: "Show not Found" });
+      return res.status(404).json({ message: "Show not found" });
     }
 
     if (parseInt(show.seats) < requestedSeat) {
@@ -131,6 +148,8 @@ app.post("/movie/book-movie", async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Server is running at http://${HOST}:${PORT}`);
+// Use the PORT from the environment or fallback to 8000
+const PORT = process.env.PORT || 8000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT}`);
 });
