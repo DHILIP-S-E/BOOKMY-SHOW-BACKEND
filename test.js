@@ -1,16 +1,17 @@
 const express = require("express");
-const app = express();
 const cors = require("cors");
 const { MongoClient, ObjectId } = require("mongodb");
 const dotenv = require("dotenv").config();
-const URL = process.env.DB;
 
+const app = express();
+const URL = process.env.DB;
 const DB_NAME = "movie_db";
 const COLLECTION_NAME = "movies";
 
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
+// GET method to fetch all movies
 app.get("/movie/get-movies", async (req, res) => {
   try {
     const client = new MongoClient(URL, {});
@@ -26,6 +27,7 @@ app.get("/movie/get-movies", async (req, res) => {
   }
 });
 
+// GET method to fetch a movie by ID
 app.get("/movie/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -36,14 +38,15 @@ app.get("/movie/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid movie ID format" });
     }
 
-    const client = await new MongoClient(URL).connect();
+    const client = new MongoClient(URL, {});
+    await client.connect();
     let db = client.db(DB_NAME);
     let dbcollection = await db.collection(COLLECTION_NAME);
 
     console.log("Querying movie with ID:", id); // Log the query
 
-    // Querying by _id as a string
-    let movie = await dbcollection.findOne({ _id: id });
+    // Querying by _id as ObjectId
+    let movie = await dbcollection.findOne({ _id: new ObjectId(id) });
     await client.close();
 
     if (!movie) {
@@ -57,9 +60,11 @@ app.get("/movie/:id", async (req, res) => {
   }
 });
 
+// POST method to book a movie
 app.post("/movie/book-movie", async (req, res) => {
   let bookingRequest = req.body;
 
+  // Validate required fields
   if (
     !bookingRequest.movieId ||
     !bookingRequest.showId ||
@@ -68,42 +73,50 @@ app.post("/movie/book-movie", async (req, res) => {
     !bookingRequest.email ||
     !bookingRequest.phoneNumber
   ) {
-    return res.status(401).json({ message: "Some fields are missing" });
+    return res.status(400).json({ message: "Some fields are missing" });
   }
 
   let requestedSeat = parseInt(bookingRequest.seats);
+  // Validate seat count
   if (isNaN(requestedSeat) || requestedSeat <= 0) {
-    return res.status(401).json({ message: "Invalid seat count" });
+    return res.status(400).json({ message: "Invalid seat count" });
   }
 
   try {
     const client = new MongoClient(URL, {});
     await client.connect();
+
     const db = client.db(DB_NAME);
     const collection = db.collection(COLLECTION_NAME);
 
+    // Find the movie
     let movie = await collection.findOne({
       _id: new ObjectId(bookingRequest.movieId),
     });
 
     if (!movie) {
+      await client.close();
       return res.status(404).json({ message: "Requested movie is not found" });
     }
 
+    // Find the show
     const show = Object.values(movie.shows)
       .flat()
       .find((s) => s.id === bookingRequest.showId);
 
     if (!show) {
-      return res.status(404).json({ message: "Show not Found" });
+      await client.close();
+      return res.status(404).json({ message: "Show not found" });
     }
 
+    // Check available seats
     if (parseInt(show.seats) < requestedSeat) {
-      return res.status(404).json({ message: "No enough seats available" });
+      await client.close();
+      return res.status(404).json({ message: "Not enough seats available" });
     }
 
+    // Update seat count
     const updateSeats = parseInt(show.seats) - requestedSeat;
-
     const date = Object.keys(movie.shows).find((d) =>
       movie.shows[d].some((s) => s.id === bookingRequest.showId)
     );
@@ -118,6 +131,7 @@ app.post("/movie/book-movie", async (req, res) => {
       seats: bookingRequest.seats,
     };
 
+    // Update the database
     const updatedResult = await collection.updateOne(
       { _id: new ObjectId(bookingRequest.movieId) },
       {
