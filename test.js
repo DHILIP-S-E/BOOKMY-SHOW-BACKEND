@@ -1,17 +1,16 @@
 const express = require("express");
+const app = express();
 const cors = require("cors");
 const { MongoClient, ObjectId } = require("mongodb");
 const dotenv = require("dotenv").config();
-
-const app = express();
 const URL = process.env.DB;
+
 const DB_NAME = "movie_db";
 const COLLECTION_NAME = "movies";
 
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// GET method to fetch all movies
 app.get("/movie/get-movies", async (req, res) => {
   try {
     const client = new MongoClient(URL, {});
@@ -27,7 +26,6 @@ app.get("/movie/get-movies", async (req, res) => {
   }
 });
 
-// GET method to fetch a movie by ID
 app.get("/movie/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -38,15 +36,14 @@ app.get("/movie/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid movie ID format" });
     }
 
-    const client = new MongoClient(URL, {});
-    await client.connect();
+    const client = await new MongoClient(URL).connect();
     let db = client.db(DB_NAME);
     let dbcollection = await db.collection(COLLECTION_NAME);
 
     console.log("Querying movie with ID:", id); // Log the query
 
-    // Querying by _id as ObjectId
-    let movie = await dbcollection.findOne({ _id: new ObjectId(id) });
+    // Querying by _id as a string
+    let movie = await dbcollection.findOne({ _id: id });
     await client.close();
 
     if (!movie) {
@@ -59,101 +56,83 @@ app.get("/movie/:id", async (req, res) => {
     res.status(500).json({ message: error.message || "Something went wrong" }); // Return specific error message
   }
 });
-
-// POST method to book a movie
 app.post("/movie/book-movie", async (req, res) => {
-  let bookingRequest = req.body;
+  const bookingRequest = req.body;
 
-  // Validate required fields
-  if (
-    !bookingRequest.movieId ||
-    !bookingRequest.showId ||
-    !bookingRequest.seats ||
-    !bookingRequest.name ||
-    !bookingRequest.email ||
-    !bookingRequest.phoneNumber
-  ) {
-    return res.status(400).json({ message: "Some fields are missing" });
+  // Log the incoming request
+  console.log("Booking Request:", bookingRequest);
+
+  // Validate input
+  if (!bookingRequest.movieId || !bookingRequest.showId || !bookingRequest.seats || !bookingRequest.name || !bookingRequest.email || !bookingRequest.phoneNumber) {
+      return res.status(400).json({ message: "Some fields are missing" });
   }
 
-  let requestedSeat = parseInt(bookingRequest.seats);
-  // Validate seat count
+  const requestedSeat = parseInt(bookingRequest.seats);
   if (isNaN(requestedSeat) || requestedSeat <= 0) {
-    return res.status(400).json({ message: "Invalid seat count" });
+      return res.status(400).json({ message: "Invalid seat count" });
   }
 
   try {
-    const client = new MongoClient(URL, {});
-    await client.connect();
-
-    const db = client.db(DB_NAME);
-    const collection = db.collection(COLLECTION_NAME);
-
-    // Find the movie
-    let movie = await collection.findOne({
-      _id: new ObjectId(bookingRequest.movieId),
-    });
-
-    if (!movie) {
-      await client.close();
-      return res.status(404).json({ message: "Requested movie is not found" });
-    }
-
-    // Find the show
-    const show = Object.values(movie.shows)
-      .flat()
-      .find((s) => s.id === bookingRequest.showId);
-
-    if (!show) {
-      await client.close();
-      return res.status(404).json({ message: "Show not found" });
-    }
-
-    // Check available seats
-    if (parseInt(show.seats) < requestedSeat) {
-      await client.close();
-      return res.status(404).json({ message: "Not enough seats available" });
-    }
-
-    // Update seat count
-    const updateSeats = parseInt(show.seats) - requestedSeat;
-    const date = Object.keys(movie.shows).find((d) =>
-      movie.shows[d].some((s) => s.id === bookingRequest.showId)
-    );
-    const showIndex = movie.shows[date].findIndex(
-      (s) => s.id === bookingRequest.showId
-    );
-
-    const userBooking = {
-      name: bookingRequest.name,
-      email: bookingRequest.email,
-      phoneNumber: bookingRequest.phoneNumber,
-      seats: bookingRequest.seats,
-    };
-
-    // Update the database
-    const updatedResult = await collection.updateOne(
-      { _id: new ObjectId(bookingRequest.movieId) },
-      {
-        $set: {
-          [`shows.${date}.${showIndex}.seats`]: updateSeats,
-        },
-        $push: {
-          [`shows.${date}.${showIndex}.bookings`]: userBooking,
-        },
+      const id = bookingRequest.movieId;
+      console.log("Received request for movie ID:", id); // Log the requested ID
+      if (typeof id !== "string" || id.length !== 24) {
+          return res.status(400).json({ message: "Invalid movie ID format" });
       }
-    );
+      const client = await new MongoClient(URL).connect();
+      const db = client.db(DB_NAME);
+      const collection = db.collection(COLLECTION_NAME);
 
-    await client.close();
+      // Find the movie
+      console.log("Finding movie with ID:", bookingRequest.movieId);
+      let movie = await collection.findOne({ _id: id });
+      console.log("Found movie:", movie);
 
-    if (updatedResult.modifiedCount === 0) {
-      return res.status(500).json({ message: "Failed to update" });
-    }
+      if (!movie) {
+          await client.close();
+          return res.status(404).json({ message: "Requested movie is not found" });
+      }
 
-    return res.status(200).json({ message: "Booking created successfully" });
+      // Find the show
+      const show = Object.values(movie.shows).flat().find((s) => s.id === bookingRequest.showId);
+      console.log("Found show:", show);
+
+      if (!show) {
+          await client.close();
+          return res.status(404).json({ message: "Show not found" });
+      }
+
+      // Check available seats
+      if (parseInt(show.seats) < requestedSeat) {
+          await client.close();
+          return res.status(400).json({ message: "Not enough seats available" });
+      }
+
+      // Update seats and add booking
+      const updateSeats = parseInt(show.seats) - requestedSeat;
+      const date = Object.keys(movie.shows).find((d) => movie.shows[d].some((s) => s.id === bookingRequest.showId));
+      const showIndex = movie.shows[date].findIndex((s) => s.id === bookingRequest.showId);
+      const userBooking = {
+          name: bookingRequest.name,
+          email: bookingRequest.email,
+          phoneNumber: bookingRequest.phoneNumber,
+          seats: bookingRequest.seats
+      };
+
+      const updatedResult = await collection.updateOne(
+          { _id: id },
+          { $set: { [`shows.${date}.${showIndex}.seats`]: updateSeats }, $push: { [`shows.${date}.${showIndex}.bookings`]: userBooking } }
+      );
+
+      await client.close();
+
+      if (updatedResult.modifiedCount === 0) {
+          return res.status(500).json({ message: "Failed to update" });
+      }
+
+      return res.status(200).json({ message: "Booking created successfully" });
   } catch (error) {
-    console.log(error);
-    return res.status(500).json({ message: "Something went wrong" });
+      console.log(error);
+      return res.status(500).json({ message: "Something went wrong" });
   }
 });
 
